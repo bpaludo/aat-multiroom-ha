@@ -1,47 +1,35 @@
 """AAT Multiroom — zones exposed as Light entities (brightness = volume).
 
-This is a deliberate "abuse" of the Light primitive so that Apple Home (via
-HomeKit Bridge) renders each zone with a visible brightness slider — which
-is the only way to get a visible volume slider for HA-bridged audio in iOS
-Casa.
+OPT-IN. These entities only exist when the "HomeKit compatibility" option is
+enabled. They are a deliberate "abuse" of the Light primitive so that Apple
+Home (via HomeKit Bridge) renders each zone with a visible brightness slider —
+the only way to get a volume slider for HA-bridged audio in iOS Casa. If you
+don't use HomeKit, leave the option off and use the media_player entities.
 
 Mapping:
-    Light on / off       <-> ZSTDBYOFF / ZSTDBYON  (zone amp out of / into stand-by)
+    Light on / off            <-> ZSTDBYOFF / ZSTDBYON  (zone amp out of / into stand-by)
     Light brightness 0..100%  <->  AAT volume 0..87 (1 dB per step)
-
-Recommended use: expose ``light.aat_multiroom_<host>_<zone>`` plus
-``switch.aat_multiroom_<host>_power`` (master) in the ``homekit:`` include
-list. The media_player and switch zone entities still exist for the HA UI
-and for voice control.
 """
 from __future__ import annotations
 
-import logging
 from typing import Any
 
-from homeassistant.components.light import (
-    ATTR_BRIGHTNESS,
-    ColorMode,
-    LightEntity,
-)
+from homeassistant.components.light import ATTR_BRIGHTNESS, ColorMode, LightEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_HOST
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .aat_protocol import AatError
 from .const import (
     AAT_VOLUME_MAX,
+    CONF_HOMEKIT_COMPAT,
     CONF_NUM_ZONES,
     CONF_ZONE_NAMES,
+    DEFAULT_HOMEKIT_COMPAT,
     DEFAULT_NUM_ZONES,
     DOMAIN,
 )
 from .coordinator import AatCoordinator
-
-_LOGGER = logging.getLogger(__name__)
+from .entity import AatEntity
 
 
 def _volume_to_brightness(volume: int) -> int:
@@ -63,6 +51,10 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
+    # Opt-in: only create the light-as-volume entities in HomeKit mode.
+    if not entry.options.get(CONF_HOMEKIT_COMPAT, DEFAULT_HOMEKIT_COMPAT):
+        return
+
     coordinator: AatCoordinator = hass.data[DOMAIN][entry.entry_id]
     num_zones = entry.data.get(CONF_NUM_ZONES, DEFAULT_NUM_ZONES)
     zone_names: dict[str, str] = entry.options.get(CONF_ZONE_NAMES, {}) or {}
@@ -78,10 +70,9 @@ async def async_setup_entry(
     )
 
 
-class AatZoneLight(CoordinatorEntity[AatCoordinator], LightEntity):
+class AatZoneLight(AatEntity, LightEntity):
     """Zone exposed as a Light: on/off + brightness (= volume)."""
 
-    _attr_has_entity_name = True
     _attr_icon = "mdi:speaker"
     _attr_supported_color_modes = {ColorMode.BRIGHTNESS}
     _attr_color_mode = ColorMode.BRIGHTNESS
@@ -93,25 +84,10 @@ class AatZoneLight(CoordinatorEntity[AatCoordinator], LightEntity):
         zone: int,
         zone_name: str,
     ) -> None:
-        super().__init__(coordinator)
+        super().__init__(coordinator, entry)
         self._zone = zone
-        self._host = entry.data[CONF_HOST]
-        self._attr_unique_id = f"{self._host}_zone_{zone}_light"
-        self._attr_name = zone_name
-
-    @property
-    def device_info(self) -> DeviceInfo:
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._host)},
-            name=f"AAT Multiroom ({self._host})",
-            manufacturer="Advanced Audio Technologies",
-            model=self.coordinator.data.model if self.coordinator.data else "AAT Multiroom",
-            sw_version=self.coordinator.data.firmware if self.coordinator.data else None,
-        )
-
-    @property
-    def available(self) -> bool:
-        return super().available and self.coordinator.data is not None
+        self._attr_unique_id = f"{self._base_uid}_zone_{zone}_light"
+        self._attr_name = f"{zone_name} (volume)"
 
     @property
     def is_on(self) -> bool | None:
@@ -120,48 +96,29 @@ class AatZoneLight(CoordinatorEntity[AatCoordinator], LightEntity):
         if not self.coordinator.data.power:
             return False
         zs = self.coordinator.data.zones.get(self._zone)
-        if zs is None:
-            return None
-        return not zs.standby
+        return None if zs is None else not zs.standby
 
     @property
     def brightness(self) -> int | None:
         if self.coordinator.data is None:
             return None
         zs = self.coordinator.data.zones.get(self._zone)
-        if zs is None:
-            return None
-        return _volume_to_brightness(zs.volume)
+        return None if zs is None else _volume_to_brightness(zs.volume)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        # Bring the master up first if it's off.
-        if self.coordinator.data and not self.coordinator.data.power:
-            try:
-                await self.coordinator.client.power_on()
-            except AatError as err:
-                _LOGGER.error("PWRON failed: %s", err)
-                raise
+        client = self.coordinator.client
+        power_off = bool(self.coordinator.data) and not self.coordinator.data.power
 
-        try:
-            await self.coordinator.client.zone_on(self._zone)
-        except AatError as err:
-            _LOGGER.error("zone_on(%s) failed: %s", self._zone, err)
-            raise
+        async def _seq() -> None:
+            if power_off:
+                await client.power_on()
+            await client.zone_on(self._zone)
+            if ATTR_BRIGHTNESS in kwargs:
+                await client.set_volume(
+                    self._zone, _brightness_to_volume(kwargs[ATTR_BRIGHTNESS])
+                )
 
-        if ATTR_BRIGHTNESS in kwargs:
-            volume = _brightness_to_volume(kwargs[ATTR_BRIGHTNESS])
-            try:
-                await self.coordinator.client.set_volume(self._zone, volume)
-            except AatError as err:
-                _LOGGER.error("set_volume(%s) failed: %s", self._zone, err)
-                raise
-
-        await self.coordinator.async_request_refresh()
+        await self._execute(_seq())
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        try:
-            await self.coordinator.client.zone_off(self._zone)
-        except AatError as err:
-            _LOGGER.error("zone_off(%s) failed: %s", self._zone, err)
-            raise
-        await self.coordinator.async_request_refresh()
+        await self._execute(self.coordinator.client.zone_off(self._zone))

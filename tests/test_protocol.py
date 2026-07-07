@@ -12,12 +12,16 @@ from pathlib import Path
 # Allow running without installing the package.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "custom_components" / "aat_multiroom"))
 
+import aat_protocol  # noqa: E402
 from aat_protocol import (  # noqa: E402
     AatClient,
+    AatCommandError,
+    AatTimeout,
     DeviceState,
     encode_command,
     parse_message,
 )
+from const import inputs_for_model, zones_for_model  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -239,6 +243,123 @@ def test_brightness_roundtrip():
         b = _volume_to_brightness(vol)
         v2 = _brightness_to_volume(b)
         assert abs(v2 - vol) <= 1, f"roundtrip failed for volume {vol}: got {v2}"
+
+
+# ---------------------------------------------------------------------------
+# Error-code detection (fork addition)
+# ---------------------------------------------------------------------------
+
+def test_error_code_reply_raises():
+    """A bare error code in the command slot ('[r001 8]') is a rejection."""
+
+    async def run() -> None:
+        client = AatClient("dummy")
+        stream = _FakeStream([b"[r001 8]"])  # error 8: PMR off
+        client._reader = stream  # type: ignore[assignment]
+        client._writer = stream  # type: ignore[assignment]
+        await client.power_on()
+
+    try:
+        asyncio.run(run())
+    except AatCommandError as err:
+        assert err.code == "8"
+    else:
+        raise AssertionError("expected AatCommandError for '[r001 8]'")
+
+
+def test_value_equal_to_error_code_is_not_an_error():
+    """A valid echoed value that equals an error code must NOT be flagged."""
+
+    async def run() -> int:
+        client = AatClient("dummy")
+        # VOLGET zone 1 = 17 (a legit volume that collides with error code 17)
+        stream = _FakeStream([b"[r001 VOLGET 1 17]"])
+        client._reader = stream  # type: ignore[assignment]
+        client._writer = stream  # type: ignore[assignment]
+        return await client.get_volume(1)
+
+    assert asyncio.run(run()) == 17
+
+
+def test_retry_after_idle_reset():
+    """First read hits EOF (idle TCPTIMEOUT reset); command retries and succeeds."""
+
+    async def run() -> bool:
+        client = AatClient("dummy")
+        dead = _FakeStream([])            # read() → b"" → treated as EOF
+        # Attempt 1 uses seq 001 (dies); the retry sends seq 002, and the
+        # device echoes that seq — so the good reply is 002, not 001.
+        good = _FakeStream([b"[r002 PWRGET ON]"])
+        streams = [dead, good]
+
+        async def fake_connect() -> None:
+            s = streams.pop(0)
+            client._reader = s   # type: ignore[assignment]
+            client._writer = s   # type: ignore[assignment]
+            client._buffer = ""
+
+        client.connect = fake_connect  # type: ignore[method-assign]
+        return await client.get_power()
+
+    assert asyncio.run(run()) is True
+
+
+def test_timeout_does_not_retry():
+    """A plain response timeout raises AatTimeout WITHOUT a resend.
+
+    Retrying a timeout would double-apply non-idempotent VOL+/VOL- steppers, so
+    the retry is restricted to AatConnectionError (idle reset = EOF).
+    """
+    writes: list[bytes] = []
+
+    class _HangStream(_FakeStream):
+        def write(self, data: bytes) -> None:
+            writes.append(data)  # capture, but never produce a reply
+
+        async def read(self, n: int) -> bytes:
+            await asyncio.sleep(3600)  # never yields — forces a read timeout
+            return b""
+
+    async def run() -> None:
+        client = AatClient("dummy")
+        stream = _HangStream([])
+        client._reader = stream  # type: ignore[assignment]
+        client._writer = stream  # type: ignore[assignment]
+        saved = aat_protocol.RESPONSE_TIMEOUT
+        aat_protocol.RESPONSE_TIMEOUT = 0.05  # keep the test fast
+        try:
+            await client.volume_up(1)
+        finally:
+            aat_protocol.RESPONSE_TIMEOUT = saved
+
+    raised = False
+    try:
+        asyncio.run(run())
+    except AatTimeout:
+        raised = True
+    assert raised, "expected AatTimeout"
+    assert len(writes) == 1, f"command must be sent once, not retried; got {len(writes)}"
+
+
+# ---------------------------------------------------------------------------
+# MODEL → topology derivation (fork addition)
+# ---------------------------------------------------------------------------
+
+def test_zones_for_model():
+    assert zones_for_model("PMR7") == 6
+    assert zones_for_model("PMR5") == 6   # 4 inputs / 6 zones
+    assert zones_for_model("PMR6") == 4   # 6 inputs / 4 zones
+    assert zones_for_model("PMR-7") == 6  # tolerates the dash form
+    assert zones_for_model("PMR8") == 2
+
+def test_inputs_for_model():
+    assert inputs_for_model("PMR7") == 6
+    assert inputs_for_model("PMR5") == 4
+    assert inputs_for_model("PMR8") == 5
+
+def test_unknown_model_uses_fallback():
+    assert zones_for_model("WHATEVER", fallback=6) == 6
+    assert inputs_for_model("WHATEVER", fallback=6) == 6
 
 
 if __name__ == "__main__":

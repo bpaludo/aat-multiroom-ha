@@ -1,37 +1,28 @@
 """AAT Multiroom — zone parameter number entities (bass, treble, balance, preamp).
 
 Each zone exposes four sliders:
-  - Graves (bass):   0..14  (7 = 0 dB, steps of 2 dB, range ±14 dB)
-  - Agudos (treble): 0..14  (7 = 0 dB, steps of 2 dB, range ±14 dB)
-  - Balanço (balance): 0..20 (10 = center, 0 = full left, 20 = full right)
-  - Pré-Amp (preamp gain): 0..7 (0 = 0 dB, 7 = +14 dB)
+  - Graves (bass):     0..14  (7 = 0 dB, steps of 2 dB, range ±14 dB)
+  - Agudos (treble):   0..14  (7 = 0 dB, steps of 2 dB, range ±14 dB)
+  - Balanço (balance): 0..20  (10 = center, 0 = full left, 20 = full right)
+  - Pré-Amp (preamp):  0..7   (0 = 0 dB, 7 = +14 dB)
 
 Values come from GETALL polling — no extra round-trips needed.
 """
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from typing import Any, Callable, Coroutine
 
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_HOST
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .aat_protocol import AatClient, AatError, ZoneState
-from .const import (
-    CONF_NUM_ZONES,
-    CONF_ZONE_NAMES,
-    DEFAULT_NUM_ZONES,
-    DOMAIN,
-)
+from .aat_protocol import AatClient, ZoneState
+from .const import CONF_NUM_ZONES, CONF_ZONE_NAMES, DEFAULT_NUM_ZONES, DOMAIN
 from .coordinator import AatCoordinator
-
-_LOGGER = logging.getLogger(__name__)
+from .entity import AatEntity
 
 
 @dataclass(frozen=True)
@@ -46,42 +37,14 @@ class _NumberDef:
 
 
 _ZONE_NUMBERS: tuple[_NumberDef, ...] = (
-    _NumberDef(
-        key="bass",
-        name="Graves",
-        icon="mdi:equalizer",
-        native_min=0,
-        native_max=14,
-        get_value=lambda zs: zs.bass,
-        set_value=lambda client, zone, v: client.set_bass(zone, v),
-    ),
-    _NumberDef(
-        key="treble",
-        name="Agudos",
-        icon="mdi:equalizer-outline",
-        native_min=0,
-        native_max=14,
-        get_value=lambda zs: zs.treble,
-        set_value=lambda client, zone, v: client.set_treble(zone, v),
-    ),
-    _NumberDef(
-        key="balance",
-        name="Balanço",
-        icon="mdi:pan-horizontal",
-        native_min=0,
-        native_max=20,
-        get_value=lambda zs: zs.balance,
-        set_value=lambda client, zone, v: client.set_balance(zone, v),
-    ),
-    _NumberDef(
-        key="preamp",
-        name="Pré-Amp",
-        icon="mdi:amplifier",
-        native_min=0,
-        native_max=7,
-        get_value=lambda zs: zs.preamp,
-        set_value=lambda client, zone, v: client.set_preamp(zone, v),
-    ),
+    _NumberDef("bass", "Graves", "mdi:equalizer", 0, 14,
+               lambda zs: zs.bass, lambda c, z, v: c.set_bass(z, v)),
+    _NumberDef("treble", "Agudos", "mdi:equalizer-outline", 0, 14,
+               lambda zs: zs.treble, lambda c, z, v: c.set_treble(z, v)),
+    _NumberDef("balance", "Balanço", "mdi:pan-horizontal", 0, 20,
+               lambda zs: zs.balance, lambda c, z, v: c.set_balance(z, v)),
+    _NumberDef("preamp", "Pré-Amp", "mdi:amplifier", 0, 7,
+               lambda zs: zs.preamp, lambda c, z, v: c.set_preamp(z, v)),
 )
 
 
@@ -107,12 +70,14 @@ async def async_setup_entry(
     )
 
 
-class AatZoneNumber(CoordinatorEntity[AatCoordinator], NumberEntity):
+class AatZoneNumber(AatEntity, NumberEntity):
     """Zone parameter exposed as a number slider."""
 
-    _attr_has_entity_name = True
     _attr_native_step = 1.0
     _attr_mode = NumberMode.SLIDER
+    # EQ/balance/preamp are tuning knobs — keep them in the device's
+    # Configuration section instead of cluttering the main controls.
+    _attr_entity_category = EntityCategory.CONFIG
 
     def __init__(
         self,
@@ -122,25 +87,14 @@ class AatZoneNumber(CoordinatorEntity[AatCoordinator], NumberEntity):
         zone_name: str,
         defn: _NumberDef,
     ) -> None:
-        super().__init__(coordinator)
+        super().__init__(coordinator, entry)
         self._zone = zone
         self._defn = defn
-        self._host = entry.data[CONF_HOST]
-        self._attr_unique_id = f"{self._host}_zone_{zone}_{defn.key}"
+        self._attr_unique_id = f"{self._base_uid}_zone_{zone}_{defn.key}"
         self._attr_name = f"{zone_name} {defn.name}"
         self._attr_icon = defn.icon
         self._attr_native_min_value = defn.native_min
         self._attr_native_max_value = defn.native_max
-
-    @property
-    def device_info(self) -> DeviceInfo:
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._host)},
-            name=f"AAT Multiroom ({self._host})",
-            manufacturer="Advanced Audio Technologies",
-            model=self.coordinator.data.model if self.coordinator.data else "AAT Multiroom",
-            sw_version=self.coordinator.data.firmware if self.coordinator.data else None,
-        )
 
     @property
     def available(self) -> bool:
@@ -158,9 +112,6 @@ class AatZoneNumber(CoordinatorEntity[AatCoordinator], NumberEntity):
         return float(self._defn.get_value(zs)) if zs is not None else None
 
     async def async_set_native_value(self, value: float) -> None:
-        try:
-            await self._defn.set_value(self.coordinator.client, self._zone, int(value))
-        except AatError as err:
-            _LOGGER.error("AAT %s set failed for zone %s: %s", self._defn.key, self._zone, err)
-            raise
-        await self.coordinator.async_request_refresh()
+        await self._execute(
+            self._defn.set_value(self.coordinator.client, self._zone, int(value))
+        )

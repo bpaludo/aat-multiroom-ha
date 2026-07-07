@@ -3,25 +3,15 @@
     "step": {
       "user": {
         "title": "Connect to AAT Multiroom",
-        "description": "Enter the IP address of your AAT amplifier. The default TCP port is 5000.",
+        "description": "Enter the IP address of your AAT amplifier. The default TCP port is 5000; use 1024 (secondary port) if you want the AAT mobile app to keep port 5000. The number of zones is detected automatically from the model.",
         "data": {
           "host": "IP address",
-          "port": "TCP port",
-          "num_zones": "Number of zones (PMR-4 = 4, PMR-5/7 = 6, PMR-8 = 2)"
-        }
-      },
-      "reconfigure": {
-        "title": "Reconfigure connection",
-        "description": "Change the IP, TCP port, or number of zones. Useful for moving HA to the AAT's secondary TCP port (default 1024) so the AAT mobile app can keep using port 5000.",
-        "data": {
-          "host": "IP address",
-          "port": "TCP port",
-          "num_zones": "Number of zones"
+          "port": "TCP port"
         }
       },
       "naming": {
         "title": "Name your zones and inputs",
-        "description": "Give each zone and input a friendly name. Leave an input blank to hide it. These names are what you'll use with Alexa.",
+        "description": "Detected {model} with {zones} zones. Give each zone and input a friendly name. Leave an input blank to hide it. These names are what you'll use with voice assistants (\"turn off the kitchen\").",
         "data": {
           "zone_1": "Zone 1 name",
           "zone_2": "Zone 2 name",
@@ -33,10 +23,20 @@
           "source_2": "Input 2 name",
           "source_3": "Input 3 name",
           "source_4": "Input 4 name",
-          "source_5": "Input 5 name (digital)",
-          "source_6": "Input 6 name (digital)",
-          "source_7": "Input 7 name (digital)",
-          "source_8": "Input 8 name (digital)"
+          "source_5": "Input 5 name",
+          "source_6": "Input 6 name",
+          "source_7": "Input 7 name",
+          "source_8": "Input 8 name",
+          "homekit_compat": "HomeKit compatibility (adds Light-as-volume entities and TV media-player class for Apple Home)"
+        }
+      },
+      "reconfigure": {
+        "title": "Reconfigure connection",
+        "description": "Change the IP, TCP port, or the zone count (only needed if the model wasn't auto-detected).",
+        "data": {
+          "host": "IP address",
+          "port": "TCP port",
+          "num_zones": "Number of zones"
         }
       }
     },
@@ -51,8 +51,8 @@
   "options": {
     "step": {
       "init": {
-        "title": "Edit names",
-        "description": "Update the friendly names for zones and inputs. Leave an input blank to hide it.",
+        "title": "Edit names and options",
+        "description": "Update the friendly names for zones and inputs, and the HomeKit toggle. Leave an input blank to hide it.",
         "data": {
           "zone_1": "Zone 1 name",
           "zone_2": "Zone 2 name",
@@ -64,10 +64,11 @@
           "source_2": "Input 2 name",
           "source_3": "Input 3 name",
           "source_4": "Input 4 name",
-          "source_5": "Input 5 name (digital)",
-          "source_6": "Input 6 name (digital)",
-          "source_7": "Input 7 name (digital)",
-          "source_8": "Input 8 name (digital)"
+          "source_5": "Input 5 name",
+          "source_6": "Input 6 name",
+          "source_7": "Input 7 name",
+          "source_8": "Input 8 name",
+          "homekit_compat": "HomeKit compatibility (Light-as-volume + TV media-player class)"
         }
       }
     }

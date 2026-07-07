@@ -1,33 +1,29 @@
 """AAT Multiroom — device-level button entities.
 
-Exposes five buttons for bulk/device operations that would otherwise require
-multiple service calls or are not reachable via the zone entities:
+Bulk / device operations that would otherwise need multiple service calls or
+aren't reachable from a single zone entity:
 
   - Ligar todas as zonas    → ZTONALL   (one round-trip vs N × zone_on)
   - Desligar todas as zonas → ZSTDBYALL (one round-trip vs N × zone_off)
   - Mutar tudo              → MUTEALL
   - Desmutar tudo           → UNMUTEALL
-  - Resetar dispositivo     → RESET     (remote reboot over TCP)
+  - Reiniciar dispositivo   → RESET     (remote reboot over TCP)
 """
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from typing import Any, Callable, Coroutine
 
 from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_HOST
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .aat_protocol import AatClient, AatError
+from .aat_protocol import AatClient
 from .const import DOMAIN
 from .coordinator import AatCoordinator
-
-_LOGGER = logging.getLogger(__name__)
+from .entity import AatEntity
 
 
 @dataclass(frozen=True)
@@ -39,36 +35,16 @@ class _ButtonDef:
 
 
 _DEVICE_BUTTONS: tuple[_ButtonDef, ...] = (
-    _ButtonDef(
-        key="zones_all_on",
-        name="Ligar todas as zonas",
-        icon="mdi:speaker-multiple",
-        press=lambda client: client.zone_on_all(),
-    ),
-    _ButtonDef(
-        key="zones_all_off",
-        name="Desligar todas as zonas",
-        icon="mdi:speaker-off",
-        press=lambda client: client.zone_off_all(),
-    ),
-    _ButtonDef(
-        key="mute_all",
-        name="Mutar tudo",
-        icon="mdi:volume-mute",
-        press=lambda client: client.mute_all(),
-    ),
-    _ButtonDef(
-        key="unmute_all",
-        name="Desmutar tudo",
-        icon="mdi:volume-high",
-        press=lambda client: client.unmute_all(),
-    ),
-    _ButtonDef(
-        key="reset",
-        name="Resetar dispositivo",
-        icon="mdi:restart",
-        press=lambda client: client.reset(),
-    ),
+    _ButtonDef("zones_all_on", "Ligar todas as zonas", "mdi:speaker-multiple",
+               lambda c: c.zone_on_all()),
+    _ButtonDef("zones_all_off", "Desligar todas as zonas", "mdi:speaker-off",
+               lambda c: c.zone_off_all()),
+    _ButtonDef("mute_all", "Mutar tudo", "mdi:volume-mute",
+               lambda c: c.mute_all()),
+    _ButtonDef("unmute_all", "Desmutar tudo", "mdi:volume-high",
+               lambda c: c.unmute_all()),
+    _ButtonDef("reset", "Reiniciar dispositivo", "mdi:restart",
+               lambda c: c.reset()),
 )
 
 
@@ -83,10 +59,8 @@ async def async_setup_entry(
     )
 
 
-class AatDeviceButton(CoordinatorEntity[AatCoordinator], ButtonEntity):
+class AatDeviceButton(AatEntity, ButtonEntity):
     """Device-level button (bulk zone commands and reset)."""
-
-    _attr_has_entity_name = True
 
     def __init__(
         self,
@@ -94,27 +68,13 @@ class AatDeviceButton(CoordinatorEntity[AatCoordinator], ButtonEntity):
         entry: ConfigEntry,
         defn: _ButtonDef,
     ) -> None:
-        super().__init__(coordinator)
-        self._host = entry.data[CONF_HOST]
+        super().__init__(coordinator, entry)
         self._defn = defn
-        self._attr_unique_id = f"{self._host}_{defn.key}"
+        self._attr_unique_id = f"{self._base_uid}_{defn.key}"
         self._attr_name = defn.name
         self._attr_icon = defn.icon
-
-    @property
-    def device_info(self) -> DeviceInfo:
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._host)},
-            name=f"AAT Multiroom ({self._host})",
-            manufacturer="Advanced Audio Technologies",
-            model=self.coordinator.data.model if self.coordinator.data else "AAT Multiroom",
-            sw_version=self.coordinator.data.firmware if self.coordinator.data else None,
-        )
+        if defn.key == "reset":
+            self._attr_entity_category = EntityCategory.CONFIG
 
     async def async_press(self) -> None:
-        try:
-            await self._defn.press(self.coordinator.client)
-        except AatError as err:
-            _LOGGER.error("AAT button %s failed: %s", self._defn.key, err)
-            raise
-        await self.coordinator.async_request_refresh()
+        await self._execute(self._defn.press(self.coordinator.client))

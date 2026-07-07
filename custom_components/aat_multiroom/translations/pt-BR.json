@@ -3,25 +3,15 @@
     "step": {
       "user": {
         "title": "Conectar ao AAT Multiroom",
-        "description": "Digite o IP do seu amplificador AAT. A porta TCP padrão é 5000.",
+        "description": "Digite o IP do seu amplificador AAT. A porta TCP padrão é 5000; use 1024 (porta secundária) se quiser que o app oficial da AAT continue na 5000. O número de zonas é detectado automaticamente pelo modelo.",
         "data": {
           "host": "Endereço IP",
-          "port": "Porta TCP",
-          "num_zones": "Número de zonas (PMR-4 = 4, PMR-5/7 = 6, PMR-8 = 2)"
-        }
-      },
-      "reconfigure": {
-        "title": "Reconfigurar conexão",
-        "description": "Altere o IP, a porta TCP ou o número de zonas. Útil quando você quer usar a porta secundária do AAT (padrão 1024) para que o app oficial continue funcionando na porta 5000.",
-        "data": {
-          "host": "Endereço IP",
-          "port": "Porta TCP",
-          "num_zones": "Número de zonas"
+          "port": "Porta TCP"
         }
       },
       "naming": {
         "title": "Nomear zonas e entradas",
-        "description": "Dê um nome amigável para cada zona e entrada. Deixe a entrada em branco para ocultá-la. Esses nomes são o que você vai usar com a Alexa (\"desliga a cozinha\" ou \"toca a sala no Spotify\").",
+        "description": "Detectado {model} com {zones} zonas. Dê um nome amigável para cada zona e entrada. Deixe a entrada em branco para ocultá-la. Esses nomes são o que você vai usar com assistentes de voz (\"desliga a cozinha\").",
         "data": {
           "zone_1": "Nome da Zona 1",
           "zone_2": "Nome da Zona 2",
@@ -33,10 +23,20 @@
           "source_2": "Nome da Entrada 2",
           "source_3": "Nome da Entrada 3",
           "source_4": "Nome da Entrada 4",
-          "source_5": "Nome da Entrada 5 (digital)",
-          "source_6": "Nome da Entrada 6 (digital)",
-          "source_7": "Nome da Entrada 7 (digital)",
-          "source_8": "Nome da Entrada 8 (digital)"
+          "source_5": "Nome da Entrada 5",
+          "source_6": "Nome da Entrada 6",
+          "source_7": "Nome da Entrada 7",
+          "source_8": "Nome da Entrada 8",
+          "homekit_compat": "Compatibilidade HomeKit (cria entidades Light-como-volume e classe TV no media player, para o app Casa da Apple)"
+        }
+      },
+      "reconfigure": {
+        "title": "Reconfigurar conexão",
+        "description": "Altere o IP, a porta TCP ou o número de zonas (só necessário se o modelo não foi detectado automaticamente).",
+        "data": {
+          "host": "Endereço IP",
+          "port": "Porta TCP",
+          "num_zones": "Número de zonas"
         }
       }
     },
@@ -51,8 +51,8 @@
   "options": {
     "step": {
       "init": {
-        "title": "Editar nomes",
-        "description": "Atualize os nomes amigáveis das zonas e entradas. Deixe em branco para ocultar uma entrada.",
+        "title": "Editar nomes e opções",
+        "description": "Atualize os nomes amigáveis das zonas e entradas, e o modo HomeKit. Deixe em branco para ocultar uma entrada.",
         "data": {
           "zone_1": "Nome da Zona 1",
           "zone_2": "Nome da Zona 2",
@@ -64,10 +64,11 @@
           "source_2": "Nome da Entrada 2",
           "source_3": "Nome da Entrada 3",
           "source_4": "Nome da Entrada 4",
-          "source_5": "Nome da Entrada 5 (digital)",
-          "source_6": "Nome da Entrada 6 (digital)",
-          "source_7": "Nome da Entrada 7 (digital)",
-          "source_8": "Nome da Entrada 8 (digital)"
+          "source_5": "Nome da Entrada 5",
+          "source_6": "Nome da Entrada 6",
+          "source_7": "Nome da Entrada 7",
+          "source_8": "Nome da Entrada 8",
+          "homekit_compat": "Compatibilidade HomeKit (Light-como-volume + classe TV no media player)"
         }
       }
     }
